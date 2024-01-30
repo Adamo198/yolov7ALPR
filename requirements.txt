@@ -37,3 +37,9 @@ thop  # FLOPs computation
 # albumentations>=1.0.3
 # pycocotools>=2.0  # COCO mAP
 # roboflow
+
+easyocr>=1.7.0
+imutils>=0.5.4
+#uninstall opencv-python-headless!! -> when you have problems with opencv PIL or imshow function
+opencv-python>=4.8.0.74
+pyserial

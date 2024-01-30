@@ -13,10 +13,13 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
+import easyocr
+from utils.alpr_utils import anpr, alpr_init, check_file_name, crop_prepare
+import os
 
 
 def detect(save_img=False):
-    source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
+    source, weights, view_img, save_txt, imgsz, trace, save_crop = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace, opt.save_crop
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
@@ -24,6 +27,9 @@ def detect(save_img=False):
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
+
+    if not os.path.exists(save_dir / "crops"):
+        os.mkdir(save_dir / "crops")
 
     # Initialize
     set_logging()
@@ -55,6 +61,8 @@ def detect(save_img=False):
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
+    
+    ocr_reader, relay_init = alpr_init()
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -107,6 +115,9 @@ def detect(save_img=False):
             save_path = str(save_dir / p.name)  # img.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+
+            ocr_time = 0
+
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -127,9 +138,22 @@ def detect(save_img=False):
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                    if save_crop:
+                        
+                        #crop an image based on coordinates
+                        object_coordinates = [int(xyxy[0]),int(xyxy[1]),int(xyxy[2]),int(xyxy[3])]
+                        cropobj = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])]
+
+                        #save crop part
+                        crop_file_path = os.path.join(save_dir / "crops" / "crop.jpg")
+                        ocr_input = crop_prepare(cropobj)
+                        cv2.imwrite(crop_file_path, ocr_input)
+                        
+                
+                anpr_res, ocr_time = anpr(ocr_reader, ocr_input, relay_init)
 
             # Print time (inference + NMS)
-            print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
+            print(f"{s}{'' if len(det) else '(ALPR - no detections), '}{(1E3 * (t2 - t1)):.1f} ms, {(1E3 * (t3 - t2)):.1f} ms NMS, {(anpr_res if len(anpr_res) else '(ANPR - no valid detections)') if len(det) else '(ANPR - standby)'} {ocr_time * 1E3:.1f} ms\n")
 
             # Stream results
             if view_img:
@@ -160,7 +184,7 @@ def detect(save_img=False):
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         #print(f"Results saved to {save_dir}{s}")
 
-    print(f'Done. ({time.time() - t0:.3f}s)')
+    print(f'Done in {time.time() - t0:.3f} s')
 
 
 if __name__ == '__main__':
@@ -183,6 +207,7 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='exp', help='save results to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
+    parser.add_argument("--save-crop", action="store_true", help="save cropped prediction boxes")
     opt = parser.parse_args()
     print(opt)
     #check_requirements(exclude=('pycocotools', 'thop'))
