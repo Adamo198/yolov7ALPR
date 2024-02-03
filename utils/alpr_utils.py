@@ -5,13 +5,12 @@ import easyocr
 import string
 import serial
 
-COM_NUM = 3
+COM_NUM = '/dev/ttyUSB0'
 BAUD = 115200
 COMMAND_OPEN = "1"
 
 CARS_DB = [
-
-    
+    'BCSR4040'    
 ]
 
 # Custom funtions for ALPR process
@@ -41,7 +40,7 @@ def crop_prepare(crop):
     blackhat = cv2.morphologyEx(crop_gray, cv2.MORPH_BLACKHAT, rectKernel)
     _, tresh = cv2.threshold(blackhat, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-    return tresh
+    return crop
 
 def anpr(ocr_reader, ocr_input, relay):
     # Run ANPR process on cropped image  
@@ -52,7 +51,7 @@ def anpr(ocr_reader, ocr_input, relay):
     if len(ocr_result):
         print("OCR result: ", ocr_result)
         for plate in ocr_result:
-            if  len(plate) >= 1 and len(plate) <= 8: #and \
+            if  len(plate) >= 2 and len(plate) <= 8: #and \
                 #(plate[0] in string.ascii_uppercase) and \
                 #(plate[1] in string.ascii_uppercase): #and \
                 #(plate[2] in string.ascii_uppercase or plate[2] in ['0','1','2','3','4','5','6','7','8','9']) and \
@@ -90,6 +89,6 @@ def alpr_init():
     ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
 
     #Relay init
-    relay = serial.Serial(("COM" + str(COM_NUM)), BAUD)
+    relay = serial.Serial(COM_NUM, BAUD)
 
     return ocr_reader, relay
