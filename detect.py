@@ -16,6 +16,7 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized,
 import easyocr
 from utils.alpr_utils import anpr, alpr_init, check_file_name, crop_prepare
 import os
+from statistics import mean
 
 
 def detect(save_img=False):
@@ -63,6 +64,9 @@ def detect(save_img=False):
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
     
     ocr_reader, relay_init = alpr_init()
+    ocr_avg = []
+    alpr_avg = []
+    det_count = 0
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -95,6 +99,8 @@ def detect(save_img=False):
         with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
             pred = model(img, augment=opt.augment)[0]
         t2 = time_synchronized()
+
+        alpr_avg.append((t2 - t1) * 1000)
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
@@ -150,7 +156,8 @@ def detect(save_img=False):
                         cv2.imwrite(crop_file_path, ocr_input)
                         
                 
-                anpr_res, ocr_time = anpr(ocr_reader, ocr_input, relay_init)
+                anpr_res, ocr_time, det_count = anpr(ocr_reader, ocr_input, relay_init, det_count)
+                ocr_avg.append(ocr_time * 1000)
 
             # Print time (inference + NMS)
             print(f"{s}{'' if len(det) else '(ALPR - no detections), '}{(1E3 * (t2 - t1)):.1f} ms, {(1E3 * (t3 - t2)):.1f} ms NMS, {(anpr_res if len(anpr_res) else '(ANPR - no valid detections)') if len(det) else '(ANPR - standby)'} {ocr_time * 1E3:.1f} ms\n")
@@ -185,6 +192,9 @@ def detect(save_img=False):
         #print(f"Results saved to {save_dir}{s}")
 
     print(f'Done in {time.time() - t0:.3f} s')
+    print(f"Average ALPR time: {mean(alpr_avg) if len(alpr_avg) else 'NaN'} ms")
+    print(f"Average OCR time: {mean(ocr_avg) if len(ocr_avg) else 'NaN'} ms")
+    print(f"Correct license plate detections: {det_count}")
 
 
 if __name__ == '__main__':
