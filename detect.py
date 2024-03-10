@@ -13,10 +13,8 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
-import easyocr
-from utils.alpr_utils import anpr, alpr_init, check_file_name, crop_prepare
+from utils.alpr_utils import anpr, anpr_init, crop_prepare
 import os
-from statistics import mean
 
 
 def detect(save_img=False):
@@ -24,6 +22,15 @@ def detect(save_img=False):
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
+    
+
+    ################
+    ocr_reader, relay_init = anpr_init()
+    cars_db = []
+
+    ################
+
+
 
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
@@ -62,11 +69,6 @@ def detect(save_img=False):
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
-    
-    ocr_reader, relay_init = alpr_init()
-    ocr_avg = []
-    alpr_avg = []
-    det_count = 0
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -78,7 +80,7 @@ def detect(save_img=False):
     old_img_w = old_img_h = imgsz
     old_img_b = 1
 
-    t0 = time.time()
+    #t0 = time.time()
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -100,8 +102,6 @@ def detect(save_img=False):
             pred = model(img, augment=opt.augment)[0]
         t2 = time_synchronized()
 
-        alpr_avg.append((t2 - t1) * 1000)
-
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t3 = time_synchronized()
@@ -121,8 +121,7 @@ def detect(save_img=False):
             save_path = str(save_dir / p.name)  # img.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-
-            ocr_time = 0
+            
 
             if len(det):
                 # Rescale boxes from img_size to im0 size
@@ -131,7 +130,7 @@ def detect(save_img=False):
                 # Print results
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                    s += f"{n} {names[int(c)]}{'s' * (n > 1)} {', '.join(['{:.0%}'.format(i) for i in det[:, -2]])}, "  # add to string
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
@@ -143,28 +142,31 @@ def detect(save_img=False):
 
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
-                    if save_crop:
+                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1) #plot bounding box
                         
+                    if save_crop:
                         #crop an image based on coordinates
                         object_coordinates = [int(xyxy[0]),int(xyxy[1]),int(xyxy[2]),int(xyxy[3])]
-                        cropobj = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])]
+                        crop = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])]
 
                         #save crop part
                         crop_file_path = os.path.join(save_dir / "crops" / "crop.jpg")
-                        ocr_input = crop_prepare(cropobj)
-                        cv2.imwrite(crop_file_path, ocr_input)
+                        #ocr_input = crop_prepare(cropobj)
+                        cv2.imwrite(crop_file_path, crop)
                         
-                
-                anpr_res, ocr_time, det_count = anpr(ocr_reader, ocr_input, relay_init, det_count)
-                ocr_avg.append(ocr_time * 1000)
+
+                ocr_input_raw = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])] #perform preprocessing and OCR
+                ocr_input = crop_prepare(ocr_input_raw)
+                anpr_res = anpr(ocr_reader, ocr_input, relay_init, cars_db)
+            t4 = time_synchronized()
 
             # Print time (inference + NMS)
-            print(f"{s}{'' if len(det) else '(ALPR - no detections), '}{(1E3 * (t2 - t1)):.1f} ms, {(1E3 * (t3 - t2)):.1f} ms NMS, {(anpr_res if len(anpr_res) else '(ANPR - no valid detections)') if len(det) else '(ANPR - standby)'} {ocr_time * 1E3:.1f} ms\n")
+            print(f"{s}{'' if len(det) else '(ALPR - no detections), '}{(1E3 * (t2 - t1)):.1f} ms, {(1E3 * (t3 - t2)):.1f} ms NMS, {(anpr_res if len(anpr_res) else '(ANPR - no valid detections)') if len(det) else '(ANPR - standby)'} {(1E3 * (t4 - t3)):.1f} ms\n")
 
             # Stream results
             if view_img:
-                cv2.imshow(str(p), im0)
+                #im0 = cv2.resize(im0, (320, 240)) #resize final image visible during detection
+                cv2.imshow('ANPR', im0)
                 cv2.waitKey(1)  # 1 millisecond
 
             # Save results (image with detections)
@@ -191,10 +193,7 @@ def detect(save_img=False):
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         #print(f"Results saved to {save_dir}{s}")
 
-    print(f'Done in {time.time() - t0:.3f} s')
-    print(f"Average ALPR time: {mean(alpr_avg) if len(alpr_avg) else 'NaN'} ms")
-    print(f"Average OCR time: {mean(ocr_avg) if len(ocr_avg) else 'NaN'} ms")
-    print(f"Correct license plate detections: {det_count}")
+    #print(f'Done in {time.time() - t0:.3f} s')
 
 
 if __name__ == '__main__':

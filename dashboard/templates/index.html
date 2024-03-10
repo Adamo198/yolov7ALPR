@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>License Plate Management Panel</title>
+    <script>
+        function validateForm() {
+            var plateNumber = document.forms["addPlateForm"]["plate_number"].value;
+            var regex = /^[a-zA-Z0-9]{6,10}$/;
+            if (!regex.test(plateNumber)) {
+                alert("Please provide correct license plate number!");
+                return false;
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>License Plate Management Panel</h1>
+    <h2>Authorized License Plates List</h2>
+    <h3 class="permanent">Permanent License Plates:</h3>
+    <ul>
+        {% for plate in plates %}
+            {% if plate[2] == "permanent" %}
+                <li>{{ plate[1] }} ({{ plate[2] }}) <a href="/delete/{{ plate[0] }}">Delete</a></li>
+            {% endif %}
+        {% endfor %}
+    </ul>
+    <br>
+    <h3 class="temporary">Temporary License Plates:</h3>
+    <ul>
+        {% for plate in plates %}
+            {% if plate[2] == "temporary" %}
+                <li>{{ plate[1] }} ({{ plate[2] }}, created: {{ plate[3][:16] }}) <a href="/delete/{{ plate[0] }}">Delete</a></li>
+            {% endif %}
+        {% endfor %}
+    </ul>
+    <br><br>
+    <h2>Add New License Plate</h2>
+    <form name="addPlateForm" action="/add" method="post" onsubmit="return validateForm()">
+        <input type="text" id="plate_number" name="plate_number" autocomplete="off" placeholder="Enter License Plate Number" required>
+        <select name="plate_type">
+            <option value="permanent">Permanent</option>
+            <option value="temporary">Temporary</option>
+        </select>
+        <button type="submit">Add</button>
+    </form>
+    <script>
+        // Convert input text to uppercase whenever it changes
+        document.getElementById("plate_number").addEventListener("input", function() {
+            this.value = this.value.toUpperCase();
+        });
+    </script>
+</body>
+</html>
