@@ -8,7 +8,7 @@ import numpy as np
 from scipy.ndimage import interpolation as inter
 import sqlite3
 
-COM_NUM = 'COM3'
+COM_NUM = 'COM4'
 BAUD = 115200
 COMMAND_OPEN = "1"
 
@@ -98,7 +98,6 @@ def anpr(ocr_reader, ocr_input, relay, cars_db):
 
 def gate_open(arduino):
     # Change relay state
-    time.sleep(0.5)
     arduino.write(COMMAND_OPEN.encode('utf-8'))
     time.sleep(0.05)
     arduino_data = arduino.readline().decode('utf-8')
@@ -112,10 +111,10 @@ def anpr_init():
     #OCR detector init
     ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
 
-    #Relay init
-    relay = serial.Serial(COM_NUM, BAUD)
+    #Arduino communication init
+    ardu_serial = serial.Serial(COM_NUM, BAUD)
 
-    return ocr_reader, relay
+    return ocr_reader, ardu_serial
 
 
 def access_database(plate_numbers):
@@ -123,7 +122,7 @@ def access_database(plate_numbers):
         # Try to connect to the database and retrieve values
         conn = sqlite3.connect('license_plates.db')
         c = conn.cursor()
-        c.execute("SELECT plate_number FROM license_plates")
+        c.execute("SELECT plate_number FROM license_plates WHERE plate_type != 'inactive'") #ignore inactive numbers
         plates_from_database = [row[0] for row in c.fetchall()]
         conn.close()
 
@@ -136,3 +135,33 @@ def access_database(plate_numbers):
         plate_numbers = plate_numbers
 
     return plate_numbers
+
+def system_switch(switch_state):
+    try:
+        conn = sqlite3.connect('license_plates.db')
+        c = conn.cursor()
+        c.execute('SELECT system_power FROM system_switch WHERE id = 1')
+        row = c.fetchone()
+        power_switch = bool(row[0])
+        conn.close()
+
+        switch_state = power_switch
+
+    except sqlite3.Error:
+        print("Failed to system switch state. Using last read switch position.")
+        switch_state = switch_state
+
+    return bool(switch_state)
+
+def detection_trigger(arduino, current_state):
+    arduino_trigger = arduino.readline().decode('utf-8')
+    if (arduino_trigger == "ANPR start\n"):
+        current_state = 1
+        time.sleep(0.1)
+    elif (arduino_trigger == "ANPR stop\n"): 
+        current_state = 0
+        time.sleep(0.1)
+    else:
+        current_state = current_state
+   
+    return current_state

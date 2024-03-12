@@ -21,8 +21,8 @@
     <h3 class="permanent">Permanent License Plates:</h3>
     <ul>
         {% for plate in plates %}
-            {% if plate[2] == "permanent" %}
-                <li>{{ plate[1] }} ({{ plate[2] }}) <a href="/delete/{{ plate[0] }}">Delete</a></li>
+            {% if plate[3] == "permanent" %}
+                <li>{{ plate[1] }} - {{ plate[2] }} &nbsp;&nbsp;&nbsp; <a href="/delete/{{ plate[0] }}">Delete</a> <a href="/move_to_temporary/{{ plate[0] }}">Temporary</a> <a href="/move_to_inactive/{{ plate[0] }}">Inactive</a></li>
             {% endif %}
         {% endfor %}
     </ul>
@@ -30,8 +30,17 @@
     <h3 class="temporary">Temporary License Plates:</h3>
     <ul>
         {% for plate in plates %}
-            {% if plate[2] == "temporary" %}
-                <li>{{ plate[1] }} ({{ plate[2] }}, created: {{ plate[3][:16] }}) <a href="/delete/{{ plate[0] }}">Delete</a></li>
+            {% if plate[3] == "temporary" %}
+                <li>{{ plate[1] }} - {{ plate[2] }} (created: {{ plate[4][:16] }}, valid 24h) &nbsp;&nbsp;&nbsp; <a href="/delete/{{ plate[0] }}">Delete</a> <a href="/move_to_permanent/{{ plate[0] }}">Permanent</a> <a href="/move_to_inactive/{{ plate[0] }}">Inactive</a></li>
+            {% endif %}
+        {% endfor %}
+    </ul>
+    <br>
+    <h3 class="inactive">Inactive License Plates:</h3>
+    <ul>
+        {% for plate in plates %}
+            {% if plate[3] == "inactive" %}
+                <li>{{ plate[1] }} - {{ plate[2] }} &nbsp;&nbsp;&nbsp; <a href="/delete/{{ plate[0] }}">Delete</a> <a href="/move_to_permanent/{{ plate[0] }}">Permanent</a> <a href="/move_to_temporary/{{ plate[0] }}">Temporary</a></li>
             {% endif %}
         {% endfor %}
     </ul>
@@ -39,17 +48,29 @@
     <h2>Add New License Plate</h2>
     <form name="addPlateForm" action="/add" method="post" onsubmit="return validateForm()">
         <input type="text" id="plate_number" name="plate_number" autocomplete="off" placeholder="Enter License Plate Number" required>
+        <input type="text" id="owner" name="owner" autocomplete="off" placeholder="Enter Owner Name" oninput="capitalizeFirstLetter(this)" required>
         <select name="plate_type">
             <option value="permanent">Permanent</option>
             <option value="temporary">Temporary</option>
+            <option value="inactive">Inactive</option>
         </select>
         <button type="submit">Add</button>
+    </form>
+    <h2>System Management</h2>
+    <form name="systemToggle" action="/system_mgmt" method="post">
+        <button type="submit" name="toggle_button">System On/Off</button>
+        <input type="text" id="system_info" name="power_switch" value="{{ power_switch }}" style="border: 0px none;" readonly>
     </form>
     <script>
         // Convert input text to uppercase whenever it changes
         document.getElementById("plate_number").addEventListener("input", function() {
             this.value = this.value.toUpperCase();
         });
+        function capitalizeFirstLetter(input) {
+        input.value = input.value.replace(/\b\w/g, function(char) {
+            return char.toUpperCase();
+        });
+    }
     </script>
 </body>
 </html>

@@ -13,7 +13,7 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
-from utils.alpr_utils import anpr, anpr_init, crop_prepare
+from utils.alpr_utils import anpr, anpr_init, crop_prepare, detection_trigger, system_switch
 import os
 
 
@@ -25,9 +25,11 @@ def detect(save_img=False):
     
 
     ################
-    ocr_reader, relay_init = anpr_init()
+    ocr_reader, ardu_init = anpr_init()
     cars_db = []
-
+    previous_state = 0
+    current_state = 0
+    switch_state = True     #system on/off button - init position
     ################
 
 
@@ -82,112 +84,118 @@ def detect(save_img=False):
 
     #t0 = time.time()
     for path, img, im0s, vid_cap in dataset:
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+        
+        #current_state = detection_trigger(ardu_init, current_state)
+        if (system_switch(switch_state)):
 
-        # Warmup
-        if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
-            old_img_b = img.shape[0]
-            old_img_h = img.shape[2]
-            old_img_w = img.shape[3]
-            for i in range(3):
-                model(img, augment=opt.augment)[0]
+            img = torch.from_numpy(img).to(device)
+            img = img.half() if half else img.float()  # uint8 to fp16/32
+            img /= 255.0  # 0 - 255 to 0.0 - 1.0
+            if img.ndimension() == 3:
+                img = img.unsqueeze(0)
 
-        # Inference
-        t1 = time_synchronized()
-        with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
-            pred = model(img, augment=opt.augment)[0]
-        t2 = time_synchronized()
+            # Warmup
+            if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+                old_img_b = img.shape[0]
+                old_img_h = img.shape[2]
+                old_img_w = img.shape[3]
+                for i in range(3):
+                    model(img, augment=opt.augment)[0]
 
-        # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
-        t3 = time_synchronized()
+            # Inference
+            t1 = time_synchronized()
+            with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
+                pred = model(img, augment=opt.augment)[0]
+            t2 = time_synchronized()
 
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
+            # Apply NMS
+            pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+            t3 = time_synchronized()
 
-        # Process detections
-        for i, det in enumerate(pred):  # detections per image
-            if webcam:  # batch_size >= 1
-                p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
-            else:
-                p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+            # Apply Classifier
+            if classify:
+                pred = apply_classifier(pred, modelc, img, im0s)
 
-            p = Path(p)  # to Path
-            save_path = str(save_dir / p.name)  # img.jpg
-            txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            
+            # Process detections
+            for i, det in enumerate(pred):  # detections per image
+                if webcam:  # batch_size >= 1
+                    p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
+                else:
+                    p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
 
-            if len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                p = Path(p)  # to Path
+                save_path = str(save_dir / p.name)  # img.jpg
+                txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
+                gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
 
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)} {', '.join(['{:.0%}'.format(i) for i in det[:, -2]])}, "  # add to string
 
-                # Write results
-                for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                if len(det):
+                    # Rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
-                    if save_img or view_img:  # Add bbox to image
-                        label = f'{names[int(cls)]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1) #plot bounding box
-                        
-                    if save_crop:
-                        #crop an image based on coordinates
-                        object_coordinates = [int(xyxy[0]),int(xyxy[1]),int(xyxy[2]),int(xyxy[3])]
-                        crop = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])]
+                    # Print results
+                    for c in det[:, -1].unique():
+                        n = (det[:, -1] == c).sum()  # detections per class
+                        s += f"{n} {names[int(c)]}{'s' * (n > 1)} {', '.join(['{:.0%}'.format(i) for i in det[:, -2]])}, "  # add to string
 
-                        #save crop part
-                        crop_file_path = os.path.join(save_dir / "crops" / "crop.jpg")
-                        #ocr_input = crop_prepare(cropobj)
-                        cv2.imwrite(crop_file_path, crop)
-                        
+                    # Write results
+                    for *xyxy, conf, cls in reversed(det):
+                        if save_txt:  # Write to file
+                            xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                            line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
+                            with open(txt_path + '.txt', 'a') as f:
+                                f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
-                ocr_input_raw = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])] #perform preprocessing and OCR
-                ocr_input = crop_prepare(ocr_input_raw)
-                anpr_res = anpr(ocr_reader, ocr_input, relay_init, cars_db)
-            t4 = time_synchronized()
+                        if save_img or view_img:  # Add bbox to image
+                            label = f'{names[int(cls)]} {conf:.2f}'
+                            plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1) #plot bounding box
 
-            # Print time (inference + NMS)
-            print(f"{s}{'' if len(det) else '(ALPR - no detections), '}{(1E3 * (t2 - t1)):.1f} ms, {(1E3 * (t3 - t2)):.1f} ms NMS, {(anpr_res if len(anpr_res) else '(ANPR - no valid detections)') if len(det) else '(ANPR - standby)'} {(1E3 * (t4 - t3)):.1f} ms\n")
+                        if save_crop:
+                            #crop an image based on coordinates
+                            object_coordinates = [int(xyxy[0]),int(xyxy[1]),int(xyxy[2]),int(xyxy[3])]
+                            crop = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])]
 
-            # Stream results
-            if view_img:
-                #im0 = cv2.resize(im0, (320, 240)) #resize final image visible during detection
-                cv2.imshow('ANPR', im0)
-                cv2.waitKey(1)  # 1 millisecond
+                            #save crop part
+                            crop_file_path = os.path.join(save_dir / "crops" / "crop.jpg")
+                            #ocr_input = crop_prepare(cropobj)
+                            cv2.imwrite(crop_file_path, crop)
 
-            # Save results (image with detections)
-            if save_img:
-                if dataset.mode == 'image':
-                    cv2.imwrite(save_path, im0)
-                    print(f" The image with the result is saved in: {save_path}")
-                else:  # 'video' or 'stream'
-                    if vid_path != save_path:  # new video
-                        vid_path = save_path
-                        if isinstance(vid_writer, cv2.VideoWriter):
-                            vid_writer.release()  # release previous video writer
-                        if vid_cap:  # video
-                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        else:  # stream
-                            fps, w, h = 30, im0.shape[1], im0.shape[0]
-                            save_path += '.mp4'
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                    vid_writer.write(im0)
+
+                    ocr_input_raw = im0[int(xyxy[1]):int(xyxy[3]),int(xyxy[0]):int(xyxy[2])] #perform preprocessing and OCR
+                    ocr_input = crop_prepare(ocr_input_raw)
+                    anpr_res = anpr(ocr_reader, ocr_input, ardu_init, cars_db)
+                t4 = time_synchronized()
+
+                # Print time (inference + NMS)
+                print(f"{s}{'' if len(det) else '(ALPR - no detections), '}{(1E3 * (t2 - t1)):.1f} ms, {(1E3 * (t3 - t2)):.1f} ms NMS, {(anpr_res if len(anpr_res) else '(ANPR - no valid detections)') if len(det) else '(ANPR - standby)'} {(1E3 * (t4 - t3)):.1f} ms\n")
+
+                # Stream results
+                if view_img:
+                    #im0 = cv2.resize(im0, (320, 240)) #resize final image visible during detection
+                    cv2.imshow('ANPR', im0)
+                    cv2.waitKey(1)  # 1 millisecond
+
+                # Save results (image with detections)
+                if save_img:
+                    if dataset.mode == 'image':
+                        cv2.imwrite(save_path, im0)
+                        print(f" The image with the result is saved in: {save_path}")
+                    else:  # 'video' or 'stream'
+                        if vid_path != save_path:  # new video
+                            vid_path = save_path
+                            if isinstance(vid_writer, cv2.VideoWriter):
+                                vid_writer.release()  # release previous video writer
+                            if vid_cap:  # video
+                                fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                                w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                                h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            else:  # stream
+                                fps, w, h = 30, im0.shape[1], im0.shape[0]
+                                save_path += '.mp4'
+                            vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+                        vid_writer.write(im0)
+            #while (current_state == 1):
+             #   current_state = detection_trigger(ardu_init, current_state)
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
