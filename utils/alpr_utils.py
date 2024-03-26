@@ -8,9 +8,12 @@ import numpy as np
 from scipy.ndimage import interpolation as inter
 import sqlite3
 
-COM_NUM = 'COM4'
+COM_NUM = 'COM3'
 BAUD = 115200
 COMMAND_OPEN = "1"
+ANPR_ON = "AON\n"
+ANPR_OFF = "AOFF\n"
+TIMEOUT = 0.01
 
 
 # Custom funtions for ALPR process
@@ -99,7 +102,7 @@ def anpr(ocr_reader, ocr_input, relay, cars_db):
 def gate_open(arduino):
     # Change relay state
     arduino.write(COMMAND_OPEN.encode('utf-8'))
-    time.sleep(0.05)
+    time.sleep(0.1)
     arduino_data = arduino.readline().decode('utf-8')
     print(arduino_data)
     time.sleep(0.5)
@@ -112,7 +115,7 @@ def anpr_init():
     ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
 
     #Arduino communication init
-    ardu_serial = serial.Serial(COM_NUM, BAUD)
+    ardu_serial = serial.Serial(COM_NUM, BAUD, timeout=TIMEOUT)
 
     return ocr_reader, ardu_serial
 
@@ -142,7 +145,7 @@ def system_switch(switch_state):
         c = conn.cursor()
         c.execute('SELECT system_power FROM system_switch WHERE id = 1')
         row = c.fetchone()
-        power_switch = bool(row[0])
+        power_switch = bool(row[0]) if row else True
         conn.close()
 
         switch_state = power_switch
@@ -155,10 +158,10 @@ def system_switch(switch_state):
 
 def detection_trigger(arduino, current_state):
     arduino_trigger = arduino.readline().decode('utf-8')
-    if (arduino_trigger == "ANPR start\n"):
+    if (arduino_trigger == ANPR_ON):
         current_state = 1
         time.sleep(0.1)
-    elif (arduino_trigger == "ANPR stop\n"): 
+    elif (arduino_trigger == ANPR_OFF): 
         current_state = 0
         time.sleep(0.1)
     else:

@@ -1,5 +1,5 @@
-const int RELAY_PIN = 13;
-const int DETECTION_PIN = 14;
+const int RELAY_PIN = 2;
+const int DETECTION_PIN = 3;
 int previousTriggerState = HIGH;
 
 void setup() {
@@ -14,13 +14,13 @@ void loop() {
   
   if (detectionTrigger == LOW && previousTriggerState == HIGH)
   {
-    Serial.print("ANPR start\n");
-    delay(1000); 
+    Serial.print("AON\n");
+    delay(300); 
   }
   else if (detectionTrigger == HIGH && previousTriggerState == LOW)
   {
-    Serial.print("ANPR stop\n");
-    delay(1000);    
+    Serial.print("AOFF\n");
+    delay(300);    
   }
   
   previousTriggerState = detectionTrigger;
@@ -32,10 +32,10 @@ void loop() {
     if (condition == '1')
     {
       digitalWrite(RELAY_PIN, HIGH);
-      Serial.print("Arduino: Relay active...\n");
+      Serial.print("Arduino: Relay active...");
       delay(300);
     }
     digitalWrite(RELAY_PIN, LOW);
-    Serial.print("Arduino: Relay disabled...\n");
+    Serial.print("Arduino: Relay disabled...");
   }
 }

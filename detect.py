@@ -27,9 +27,8 @@ def detect(save_img=False):
     ################
     ocr_reader, ardu_init = anpr_init()
     cars_db = []
-    previous_state = 0
-    current_state = 0
     switch_state = True     #system on/off button - init position
+    nvr_state = False
     ################
 
 
@@ -84,10 +83,10 @@ def detect(save_img=False):
 
     #t0 = time.time()
     for path, img, im0s, vid_cap in dataset:
-        
-        #current_state = detection_trigger(ardu_init, current_state)
-        if (system_switch(switch_state)):
+        switch_state = system_switch(switch_state) #check if dashboard button for system management is active
+        nvr_state = detection_trigger(ardu_init, nvr_state) #check if NVR relay is active - car is detected
 
+        if (switch_state and nvr_state):
             img = torch.from_numpy(img).to(device)
             img = img.half() if half else img.float()  # uint8 to fp16/32
             img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -194,8 +193,6 @@ def detect(save_img=False):
                                 save_path += '.mp4'
                             vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                         vid_writer.write(im0)
-            #while (current_state == 1):
-             #   current_state = detection_trigger(ardu_init, current_state)
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
